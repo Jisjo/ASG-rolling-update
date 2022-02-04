@@ -1,0 +1,88 @@
+---
+
+- name: "Creating Dynamic Inventory"
+  hosts: localhost
+  vars:
+    aws_access_key: ""
+    aws_secret_key: ""
+    region: "ap-south-1"
+    ssh_port: 22
+    ssh_user: "ec2-user"
+    ssh_key: key.pem
+    autoscaling_groupName: ASG-rolling-update
+
+  tasks:
+    - name: "Collecting Instance information"
+      ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        filters:
+          "tag:aws:autoscaling:groupName": "{{ autoscaling_groupName }}"
+          instance-state-name: [ "running"]
+      register: ec2_info
+
+    - name: "Creating Dynamic Inventory"
+      add_host:
+        name: "{{ item.public_ip_address }}"
+        groups: ASG-rolling-update"
+        ansible_host: "{{ item.public_ip_address }}"
+        ansible_ssh_port: "{{ ssh_port }}"
+        ansible_user: "{{ ssh_user }}"
+        ansible_ssh_private_key_file: "{{ ssh_key }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      with_items:
+        - "{{ ec2_info.instances }}"
+
+- name: "Depolying content from git"
+  become: true
+  hosts: ASG-rolling-update"
+  serial: 1
+  vars:
+    url : https://github.com/BetcyBabu/sample-website.git
+    seconds: 45
+  tasks:
+
+    - name: "Cloning contents from git {{ url }}"
+      git:
+        repo: "{{ url }}"
+        dest: /var/website_files/
+      register: clone_status
+
+    - name: "Disabling health check"
+      when: clone_status.changed == true
+      file:
+        path: /var/www/html/health.html
+        mode: 0000
+
+    - name: "Waiting for ELB to off-load the instance"
+      pause:
+        seconds: "{{ seconds }}"
+
+    - name: "Copying files to website document root"
+      when: clone_status.changed == true
+      copy:
+        remote_src: yes
+        src: /var/website_files/
+        dest: /var/www/html/
+        owner: apache
+        group: apache
+
+
+    - name: "Enabling health check"
+      when: clone_status.changed == true
+      file:
+        path: /var/www/html/health.html
+        mode: 0644
+
+    - name: "Restarting Apache"
+
+      when: clone_status.changed == true
+      service:
+        name: httpd
+        state: restarted
+
+
+    - name: "Waiting for ELB to load the instance"
+      pause:
+        seconds: "{{ seconds }}"
