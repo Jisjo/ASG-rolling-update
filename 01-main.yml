@@ -39,7 +39,7 @@
   hosts: ASG-rolling-update"
   serial: 1
   vars:
-    url : https://github.com/BetcyBabu/sample-website.git
+    url : https://github.com/jisjo/sample-website.git
     seconds: 45
   tasks:
 
